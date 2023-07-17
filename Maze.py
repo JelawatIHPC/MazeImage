@@ -11,7 +11,7 @@ if not input_str.isnumeric():
     MAZE_SIZE = 99
 else:
     MAZE_SIZE = int(input_str)
-BLOCK_SIZE = 8
+BLOCK_SIZE = 10
 MAZE_IMAGE_SIZE = (MAZE_SIZE + 2) * (BLOCK_SIZE + 1) + 1
 print("Image size will be %dx%d" % (MAZE_IMAGE_SIZE, MAZE_IMAGE_SIZE))
 img = Image.new("RGB", (MAZE_IMAGE_SIZE, MAZE_IMAGE_SIZE), 0xEEEEEE)
@@ -29,20 +29,20 @@ maze_shape = numpy.zeros(shape=(MAZE_SIZE, MAZE_SIZE), dtype=numpy.int8)
 maze_shape[0][0] = UP
 
 # 矩形并查集mask, 这是为了优化生成速度用的
-maze_mask = numpy.empty(shape=(MAZE_SIZE * MAZE_SIZE, 4), dtype=int)
+maze_mask = numpy.empty(shape=(MAZE_SIZE * MAZE_SIZE, 4), dtype=numpy.int32)
 for i in range(MAZE_SIZE):
     for j in range(MAZE_SIZE):
         # [LEFT, RIGHT, TOP, DOWN]
         maze_mask[i * MAZE_SIZE + j] = [i, i, j, j]
 
 # 迷宫并查集表, 记录每个坐标属于哪一个集合
-maze = numpy.empty(shape=(MAZE_SIZE, MAZE_SIZE), dtype=int)
+maze = numpy.empty(shape=(MAZE_SIZE, MAZE_SIZE), dtype=numpy.int32)
 for i in range(MAZE_SIZE):
     for j in range(MAZE_SIZE):
         maze[i][j] = i * MAZE_SIZE + j
 
 
-def Fill(x, y, val):
+def Fill(maze, maze_mask, x: int, y: int, val: int):
 
     # Fill的效果为找指定坐标(x, y)所在的集合, 然后将这个集合并入指定集合val
     # 类似于MSPaint的填色桶
@@ -66,10 +66,10 @@ def Fill(x, y, val):
     maze_mask[val][3] = max(maze_mask[val][3], maze_mask[old_val][3])
 
 
-def MakePath(x, y, drt):
+def MakePath(maze, maze_mask, maze_shape, x: int, y: int, drt: int):
 
     # 将指定坐标(x, y)根据方向drt尝试打通
-    # 0: Up, 1: Right, 2: Down, 3:Left
+    # 0: Up, 1: Right, 2: Down, 3: Left
     # 如果成功打通, 返回True，否则返回False
 
     # 打通: 将对应方向上的两个格子所在集合合并为一个集合
@@ -80,11 +80,11 @@ def MakePath(x, y, drt):
         if maze[x][y] == maze[x][y-1]:
             return False
         new_val = min(maze[x][y], maze[x][y-1])
-        maze_shape[x][y] |= UP
+        maze_shape[x][y] = numpy.bitwise_or(maze_shape[x][y], UP)
         if maze[x][y] != new_val:
-            Fill(x, y, new_val)
+            Fill(maze, maze_mask, x, y, new_val)
         elif maze[x][y-1] != new_val:
-            Fill(x, y-1, new_val)
+            Fill(maze, maze_mask, x, y-1, new_val)
         return True
     
     elif drt == 1:
@@ -93,11 +93,11 @@ def MakePath(x, y, drt):
         if maze[x][y] == maze[x+1][y]:
             return False
         new_val = min(maze[x][y], maze[x+1][y])
-        maze_shape[x+1][y] |= LEFT
+        maze_shape[x+1][y] = numpy.bitwise_or(maze_shape[x+1][y], LEFT)
         if maze[x][y] != new_val:
-            Fill(x, y, new_val)
+            Fill(maze, maze_mask, x, y, new_val)
         elif maze[x+1][y] != new_val:
-            Fill(x+1, y, new_val)
+            Fill(maze, maze_mask, x+1, y, new_val)
         return True
     
     elif drt == 2:
@@ -106,11 +106,11 @@ def MakePath(x, y, drt):
         if maze[x][y] == maze[x][y+1]:
             return False
         new_val = min(maze[x][y], maze[x][y+1])
-        maze_shape[x][y+1] |= UP
+        maze_shape[x][y+1] = numpy.bitwise_or(maze_shape[x][y+1], UP)
         if maze[x][y] != new_val:
-            Fill(x, y, new_val)
+            Fill(maze, maze_mask, x, y, new_val)
         elif maze[x][y+1] != new_val:
-            Fill(x, y+1, new_val)
+            Fill(maze, maze_mask, x, y+1, new_val)
         return True
     
     elif drt == 3:
@@ -119,11 +119,11 @@ def MakePath(x, y, drt):
         if maze[x][y] == maze[x-1][y]:
             return False
         new_val = min(maze[x][y], maze[x-1][y])
-        maze_shape[x][y] |= LEFT
+        maze_shape[x][y] = numpy.bitwise_or(maze_shape[x][y], LEFT)
         if maze[x][y] != new_val:
-            Fill(x, y, new_val)
+            Fill(maze, maze_mask, x, y, new_val)
         elif maze[x-1][y] != new_val:
-            Fill(x-1, y, new_val)
+            Fill(maze, maze_mask, x-1, y, new_val)
         return True
     
     return False
@@ -135,13 +135,20 @@ import random
 import math
 import time
 
+# 0,1,2,3 全排列
+direction_full_permutations = \
+    [[0, 1, 2, 3], [0, 1, 3, 2], [0, 2, 1, 3], [0, 2, 3, 1], [0, 3, 1, 2], [0, 3, 2, 1], \
+     [1, 0, 2, 3], [1, 0, 3, 2], [1, 2, 0, 3], [1, 2, 3, 0], [1, 3, 0, 2], [1, 3, 2, 0], \
+     [2, 0, 1, 3], [2, 0, 3, 1], [2, 1, 0, 3], [2, 1, 3, 0], [2, 3, 0, 1], [2, 3, 1, 0], \
+     [3, 0, 1, 2], [3, 0, 2, 1], [3, 1, 0, 2], [3, 1, 2, 0], [3, 2, 0, 1], [3, 2, 1, 0]]
+
 start_time = time.time()
-patching = False
+patching: bool = False
 # 整个迷宫被打通的标志是所有格子都属于0号集合
 while numpy.any(maze):
 
     # 使用shuffle来实现对迷宫每一个格子都做一次打通
-    rlist = numpy.arange(MAZE_SIZE * MAZE_SIZE)
+    rlist = numpy.arange(MAZE_SIZE * MAZE_SIZE, dtype=numpy.int32)
     random.shuffle(rlist)
     last_print = time.time()
 
@@ -149,10 +156,9 @@ while numpy.any(maze):
         x = math.floor(rlist[i] / MAZE_SIZE)
         y = rlist[i] % MAZE_SIZE
         # 打通
-        direction = [0, 1, 2, 3]
-        random.shuffle(direction)
-        for j in range(4):
-            if MakePath(x, y, direction[j]):
+        direction = random.choice(direction_full_permutations)
+        for d in direction:
+            if MakePath(maze, maze_mask, maze_shape, x, y, d):
                 break
         # 显示进度
         if time.time() - last_print > 1.:
@@ -162,7 +168,7 @@ while numpy.any(maze):
                 print("Generating ... (%d/%d)" % (i, MAZE_SIZE * MAZE_SIZE))
             last_print = time.time()
             # 跑路装置, 如果迷宫已经生成完毕了直接走
-            if not numpy.any(maze):
+            if patching and not numpy.any(maze):
                 break
     
     # 由于随机访问格子的关系, 可能有那么一些格子在第一轮没有被打通
@@ -172,42 +178,52 @@ while numpy.any(maze):
 print("Generated with %.2f secs." % (time.time() - start_time))
 
 # 迷宫->图片
-start_time = time.time()
-last_print = time.time()
-nimg = numpy.asarray(img).copy()
-# 图片比迷宫本身大一圈, 有1格的空白
-for i in range(MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2):
-    for j in range(MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2):
+def Convert(img_array, maze_shape):
+    last_print: float = time.time()
+    # 图片比迷宫本身大一圈, 有1格的空白
+    for i in range(MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2):
 
-        x = math.floor(i / (BLOCK_SIZE+1))
-        y = math.floor(j / (BLOCK_SIZE+1))
-        if x >= MAZE_SIZE or y >= MAZE_SIZE:
-            # PIL存储是翻转的
-            nimg[j+BLOCK_SIZE+1][i+BLOCK_SIZE+1] = [0x11, 0x11, 0x11]
-            continue
+        x: int = math.floor(i / (BLOCK_SIZE+1))
+        y: int = 0
+        xr: int = i % (BLOCK_SIZE+1)
+        yr: int = -1     # 抵消掉第一个+1
+        
+        for j in range(MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2):
 
-        xr = i % (BLOCK_SIZE+1)
-        yr = j % (BLOCK_SIZE+1)
-        # 根据迷宫设置像素
-        if xr > 0:
-            if yr > 0 or maze_shape[x][y] & UP > 0:
-                continue
-        else:
-            if yr > 0 and maze_shape[x][y] & LEFT > 0:
-                continue
+            # 默认j是从0开始一直+1直到上界, 优化掉除法和取余
+            yr += 1
+            if yr >= BLOCK_SIZE + 1:
+                y += 1
+                yr = 0
             
-        # PIL存储是翻转的
-        nimg[j+BLOCK_SIZE+1][i+BLOCK_SIZE+1] = [0x11, 0x11, 0x11]
+            if x >= MAZE_SIZE or y >= MAZE_SIZE:
+                # PIL存储是翻转的
+                img_array[j+BLOCK_SIZE+1][i+BLOCK_SIZE+1] = [0x11, 0x11, 0x11]
+                continue
 
-    # 进度条
-    if time.time() - last_print > 1.:
-        print("Converting ... (%d/%d)" % (i * (MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2) + j, \
-            (MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2) * (MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2)))
-        last_print = time.time()
-# 在右下角放置出口
-for i in range(BLOCK_SIZE):
-    nimg[MAZE_IMAGE_SIZE-BLOCK_SIZE-2][MAZE_IMAGE_SIZE-BLOCK_SIZE-3-i] = [0xEE, 0xEE, 0xEE]
+            # 根据迷宫设置像素
+            if xr > 0:
+                if yr > 0 or numpy.bitwise_and(maze_shape[x][y], UP) > 0:
+                    continue
+            else:
+                if yr > 0 and numpy.bitwise_and(maze_shape[x][y], LEFT) > 0:
+                    continue
+                
+            # PIL存储是翻转的
+            img_array[j+BLOCK_SIZE+1][i+BLOCK_SIZE+1] = [0x11, 0x11, 0x11]
 
+        # 进度条
+        if time.time() - last_print > 1.:
+            print("Converting ... (%d/%d)" % (i * (MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2) + j, \
+                (MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2) * (MAZE_IMAGE_SIZE - (BLOCK_SIZE + 1) * 2)))
+            last_print = time.time()
+    # 在右下角放置出口
+    for i in range(BLOCK_SIZE):
+        img_array[MAZE_IMAGE_SIZE-BLOCK_SIZE-2][MAZE_IMAGE_SIZE-BLOCK_SIZE-3-i] = [0xEE, 0xEE, 0xEE]
+
+start_time = time.time()
+nimg = numpy.asarray(img).copy()
+Convert(nimg, maze_shape)
 print("Converted into image with %.2f secs." % (time.time() - start_time))
 
 # 保存到文件
